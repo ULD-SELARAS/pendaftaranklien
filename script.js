@@ -11,8 +11,8 @@ const SETTINGS_KEY = 'uld_settings';
 const ADMIN_SESSION_KEY = 'uld_admin_session';
 
 // --- KONFIGURASI INTEGRASI GOOGLE (WAJIB DIISI) ---
-// ⚠️ GANTI URL INI dengan URL Web App dari Google Apps Script Anda
-https://script.google.com/macros/s/AKfycbzNa54WNPgS1yS-1aR1641a8wicP3Q86GFu2sNpHXD8hC-gNlZ9BjM8hFchumFSVLjr/exec 
+// ⚠️ PASTIKAN URL INI SUDAH BENAR
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxJdvMXn1ZIV2DwIsSrUzWGLK3Fb8jkfIBROZbIgQwqmnsBaYnL2HvYxOkhYYDp7qvN/exec";
 
 const defaultSettings = {
     appName: "SELARAS",
@@ -29,8 +29,8 @@ const defaultSettings = {
 const initialSchools = [
     { npsn: "20103968", name: "SD NEGERI 01 PAGI" },
     { npsn: "20104001", name: "SD NEGERI 03 PAGI" },
-    { npsn: "20107880", name: "SMP NEGERI 1 JAKARTA" },
-    { npsn: "20107881", name: "SMA NEGERI 1 JAKARTA" }
+    { npsn: "20100251", name: "SMP NEGERI 1 JAKARTA" },
+    { npsn: "20100216", name: "SMA NEGERI 1 JAKARTA" }
 ];
 
 let state = {
@@ -61,9 +61,11 @@ function saveState() {
 // ==========================================
 async function uploadFileToDrive(file, folderPath) {
     if (!GOOGLE_SCRIPT_URL) {
-        console.warn('GOOGLE_SCRIPT_URL tidak diisi, file tidak akan diupload ke Drive');
+        console.error('❌ GOOGLE_SCRIPT_URL tidak diisi!');
         return null;
     }
+    
+    console.log('📤 Uploading file to Drive...');
     
     const reader = new FileReader();
     return new Promise((resolve) => {
@@ -78,15 +80,16 @@ async function uploadFileToDrive(file, folderPath) {
             };
             
             try {
+                console.log('Sending request to:', GOOGLE_SCRIPT_URL);
                 const response = await fetch(GOOGLE_SCRIPT_URL, {
                     method: 'POST',
                     body: JSON.stringify(payload)
                 });
                 const result = await response.json();
-                console.log('Upload result:', result);
+                console.log('✅ Upload result:', result);
                 resolve(result.fileUrl || null);
             } catch (error) {
-                console.error("Upload Error:", error);
+                console.error("❌ Upload Error:", error);
                 resolve(null);
             }
         };
@@ -96,9 +99,11 @@ async function uploadFileToDrive(file, folderPath) {
 
 async function saveToSpreadsheet(submission) {
     if (!GOOGLE_SCRIPT_URL) {
-        console.warn('GOOGLE_SCRIPT_URL tidak diisi, data hanya disimpan di localStorage');
-        return true;
+        console.error('❌ GOOGLE_SCRIPT_URL tidak diisi!');
+        return false;
     }
+    
+    console.log('💾 Saving to Spreadsheet...');
     
     const payload = {
         action: 'appendSheet',
@@ -106,15 +111,16 @@ async function saveToSpreadsheet(submission) {
     };
     
     try {
+        console.log('Sending request to:', GOOGLE_SCRIPT_URL);
         const response = await fetch(GOOGLE_SCRIPT_URL, {
             method: 'POST',
             body: JSON.stringify(payload)
         });
         const result = await response.json();
-        console.log('Sheet save result:', result);
+        console.log('✅ Sheet save result:', result);
         return result.status === 'success';
     } catch (error) {
-        console.error("Sheet Error:", error);
+        console.error("❌ Sheet Error:", error);
         return false;
     }
 }
@@ -314,6 +320,8 @@ async function handleFormSubmit(e) {
     e.preventDefault();
     showLoading(true);
     
+    console.log('📝 Form submitted!');
+    
     const formData = new FormData(e.target);
     const data = Object.fromEntries(formData.entries());
     
@@ -340,17 +348,14 @@ async function handleFormSubmit(e) {
         if (fileInput.files.length > 0) {
             const now = new Date();
             const folderPath = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}`;
-            const cleanName = data.parentName.replace(/[^a-zA-Z0-9]/g, '');
-            const fileName = `${data.studentName}_${cleanName}_HistoryTes`;
             
+            console.log('📁 Uploading to folder:', folderPath);
             driveFileUrl = await uploadFileToDrive(fileInput.files[0], folderPath);
+            
+            if (!driveFileUrl) {
+                console.error('❌ File upload failed!');
+            }
         }
-    }
-    
-    if (data.hasHistory === 'Ya' && GOOGLE_SCRIPT_URL && !driveFileUrl) {
-        showLoading(false);
-        showToast('Gagal', 'Gagal mengupload file ke Drive. Silakan coba lagi.', 'error');
-        return;
     }
     
     let queueNumber = null;
@@ -373,19 +378,23 @@ async function handleFormSubmit(e) {
         auditLog: []
     };
     
+    console.log('📦 Submission object:', submission);
+    
     // Simpan ke Spreadsheet
     if (GOOGLE_SCRIPT_URL) {
         const sheetSuccess = await saveToSpreadsheet(submission);
         if (!sheetSuccess) {
             showLoading(false);
-            showToast('Gagal', 'Gagal menyimpan ke Database Server.', 'error');
-            return;
+            showToast('Gagal', 'Gagal menyimpan ke Database Server. Data hanya tersimpan lokal.', 'warning');
+            // Tetap simpan ke localStorage meskipun gagal ke server
         }
     }
     
     state.submissions.push(submission);
     saveState();
     showLoading(false);
+    
+    console.log('✅ Form submission complete!');
     
     if (isRejected) {
         Swal.fire({
@@ -397,7 +406,7 @@ async function handleFormSubmit(e) {
     } else {
         Swal.fire({
             title: 'Pendaftaran Berhasil',
-            text: 'Mohon menunggu admin menghubungi anda.',
+            text: 'Data telah tersimpan. Mohon menunggu admin menghubungi anda.',
             icon: 'success',
             confirmButtonColor: state.settings.primaryColor
         });
@@ -437,6 +446,9 @@ function renderAdminDashboard() {
     if (!state.isAdmin) return navigate('login');
     
     const s = state.submissions.filter(x => !x.isDeleted);
+    
+    console.log('📊 Total submissions:', s.length);
+    
     document.getElementById('stat-selesai').innerText = s.filter(x => x.status === 'Selesai').length;
     document.getElementById('stat-proses').innerText = s.filter(x => x.status === 'Proses').length;
     document.getElementById('stat-cancel').innerText = s.filter(x => x.status.startsWith('Cancel')).length;
@@ -465,6 +477,8 @@ function renderAdminTable(filterStatus = 'all') {
     if (filterStatus !== 'all') {
         data = data.filter(item => item.status === filterStatus);
     }
+    
+    console.log('📋 Rendering table with', data.length, 'items');
     
     if (data.length === 0) {
         tbody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-gray-500">Tidak ada data.</td></tr>`;
@@ -589,10 +603,10 @@ function resetSystem() {
     }
 }
 
-// --- MODAL FUNCTIONS (akan dilanjutkan di bagian berikutnya) ---
+// --- MODAL FUNCTIONS ---
 function openDetail(id) {
-    // Implementasi lengkap ada di file terpisah
     console.log('Opening detail for:', id);
+    alert('Fungsi detail belum diimplementasi. ID: ' + id);
 }
 
 function closeModal() {
@@ -607,8 +621,19 @@ function closeExportModal() {
     document.getElementById('exportModal').classList.add('hidden');
 }
 
+function selectExportMode(mode) {
+    document.getElementById('dateRangeContainer').classList.toggle('hidden', mode !== 'all');
+    document.querySelector(`input[name="exportMode"][value="${mode}"]`).checked = true;
+}
+
+function generateBulkPDF() {
+    alert('Fungsi export PDF belum diimplementasi');
+}
+
 // --- INIT ---
 window.onload = function() {
+    console.log('🚀 Application loaded!');
+    console.log('🔗 GOOGLE_SCRIPT_URL:', GOOGLE_SCRIPT_URL ? 'SET ✅' : 'NOT SET ❌');
     applyBranding();
     if(state.isAdmin) navigate('dashboard');
 };
