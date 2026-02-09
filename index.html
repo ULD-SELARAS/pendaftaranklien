@@ -13,7 +13,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
+
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         
@@ -38,12 +38,12 @@
         }
         .spinner { border: 4px solid #f3f3f3; border-top: 4px solid var(--brand-primary); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        
+
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .fade-in { animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        
+
         input[type="color"] {
             -webkit-appearance: none; border: none; width: 40px; height: 40px; border-radius: 50%; overflow: hidden; padding: 0; cursor: pointer;
         }
@@ -87,7 +87,7 @@
                     <h2 class="text-2xl font-bold mb-2">Formulir Pendaftaran Konsultasi</h2>
                     <p class="text-blue-100">Layanan Daring dan Luring untuk Pendidikan Inklusif</p>
                 </div>
-                
+
                 <form id="consultationForm" onsubmit="handleFormSubmit(event)" class="p-6 md:p-8 space-y-8">
                     
                     <!-- 0. Jenis Layanan -->
@@ -371,6 +371,7 @@
         <footer class="mt-12 py-6 text-center text-gray-500 text-sm border-t">
             <p id="footer-text-display">Dinas Pendidikan Provinsi DKI Jakarta</p>
         </footer>
+
     </main>
 
     <!-- Modal Detail & Aksi -->
@@ -420,6 +421,860 @@
         </div>
     </div>
 
-    <script src="script.js"></script>
+    <script>
+        // ==========================================
+        // 1. CONFIG & STATE
+        // ==========================================
+        const DB_KEY = 'uld_submissions';
+        const SCHOOL_DB_KEY = 'uld_schools';
+        const QUEUE_KEY = 'uld_queue_counter';
+        const SETTINGS_KEY = 'uld_settings';
+        const ADMIN_SESSION_KEY = 'uld_admin_session';
+        
+        // --- KONFIGURASI INTEGRASI GOOGLE (WAJIB DIISI) ---
+        // Ganti URL ini dengan URL Web App dari Google Apps Script Anda
+        const GOOGLE_SCRIPT_URL = ""; 
+
+        const defaultSettings = {
+            appName: "SELARAS",
+            appTagline: "Unit Layanan Disabilitas",
+            appLogo: null,
+            agencyLogo: null,
+            favicon: null,
+            primaryColor: "#1e3a8a",
+            loginBg: null,
+            footerText: "Dinas Pendidikan Provinsi DKI Jakarta",
+            pdfTemplate: null
+        };
+
+        const initialSchools = [
+            { npsn: "20103968", name: "SD NEGERI 01 PAGI" },
+            { npsn: "20104001", name: "SD NEGERI 03 PAGI" },
+            { npsn: "20107880", name: "SMP NEGERI 1 JAKARTA" },
+            { npsn: "20107881", name: "SMA NEGERI 1 JAKARTA" }
+        ];
+
+        let state = {
+            submissions: JSON.parse(localStorage.getItem(DB_KEY)) || [],
+            schools: JSON.parse(localStorage.getItem(SCHOOL_DB_KEY)) || initialSchools,
+            queueCounter: parseInt(localStorage.getItem(QUEUE_KEY)) || 1,
+            settings: { ...defaultSettings, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}) },
+            isAdmin: sessionStorage.getItem(ADMIN_SESSION_KEY) === 'true',
+            currentFilter: 'all'
+        };
+
+        if (!localStorage.getItem(SETTINGS_KEY)) state.settings = defaultSettings;
+        else { const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY)); state.settings = { ...defaultSettings, ...saved }; }
+
+        function saveState() {
+            localStorage.setItem(DB_KEY, JSON.stringify(state.submissions));
+            localStorage.setItem(SCHOOL_DB_KEY, JSON.stringify(state.schools));
+            localStorage.setItem(QUEUE_KEY, state.queueCounter);
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
+        }
+
+        // ==========================================
+        // 2. GOOGLE INTEGRATION HELPERS
+        // ==========================================
+        async function uploadFileToDrive(file, folderPath) {
+            if (!GOOGLE_SCRIPT_URL) return null; // Skip if no URL
+            
+            const reader = new FileReader();
+            return new Promise((resolve) => {
+                reader.onload = async () => {
+                    const base64Data = reader.result.split(',')[1]; // Ambil hanya data base64
+                    const payload = {
+                        action: 'uploadFile',
+                        fileName: file.name,
+                        mimeType: file.type,
+                        data: base64Data,
+                        folderPath: folderPath
+                    };
+
+                    try {
+                        const response = await fetch(GOOGLE_SCRIPT_URL, {
+                            method: 'POST',
+                            body: JSON.stringify(payload)
+                        });
+                        const result = await response.json();
+                        resolve(result.fileUrl || null);
+                    } catch (error) {
+                        console.error("Upload Error:", error);
+                        resolve(null);
+                    }
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function saveToSpreadsheet(submission) {
+            if (!GOOGLE_SCRIPT_URL) return true; // Skip if no URL
+            
+            const payload = {
+                action: 'appendSheet',
+                data: submission
+            };
+
+            try {
+                const response = await fetch(GOOGLE_SCRIPT_URL, {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+                return result.status === 'success';
+            } catch (error) {
+                console.error("Sheet Error:", error);
+                return false;
+            }
+        }
+
+        // ==========================================
+        // 3. BRANDING FUNCTIONS
+        // ==========================================
+        function applyBranding() {
+            const s = state.settings; const root = document.documentElement;
+            root.style.setProperty('--brand-primary', s.primaryColor);
+            document.getElementById('setPrimaryColor').value = s.primaryColor;
+            document.getElementById('setPrimaryColorText').innerText = s.primaryColor;
+            document.getElementById('page-title').innerText = s.appName + " - " + s.appTagline;
+            document.getElementById('nav-app-name').innerText = s.appName;
+            document.getElementById('nav-subtitle').innerText = s.appTagline;
+            document.getElementById('footer-text-display').innerText = s.footerText;
+            const navLogo = document.getElementById('nav-logo-img');
+            if (s.appLogo) { navLogo.src = s.appLogo; navLogo.classList.remove('hidden'); document.getElementById('nav-logo-icon').classList.add('hidden'); } 
+            else { navLogo.classList.add('hidden'); document.getElementById('nav-logo-icon').classList.remove('hidden'); }
+            const loginBg = document.getElementById('login-bg-layer');
+            if (s.loginBg) loginBg.style.backgroundImage = `url('${s.loginBg}')`;
+            if (s.favicon) document.getElementById('dynamic-favicon').href = s.favicon;
+            document.getElementById('setAppName').value = s.appName;
+            document.getElementById('setAppTagline').value = s.appTagline;
+            document.getElementById('setFooterText').value = s.footerText;
+        }
+
+        function handleFileInputToBase64(fileId, callback) {
+            const input = document.getElementById(fileId);
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) { callback(e.target.result); };
+                reader.readAsDataURL(input.files[0]);
+            } else { callback(null); }
+        }
+
+        function saveAllSettings() {
+            showLoading(true);
+            state.settings.appName = document.getElementById('setAppName').value;
+            state.settings.appTagline = document.getElementById('setAppTagline').value;
+            state.settings.primaryColor = document.getElementById('setPrimaryColor').value;
+            state.settings.footerText = document.getElementById('setFooterText').value;
+            const saveFiles = () => {
+                handleFileInputToBase64('setAppLogo', (res) => { if(res) state.settings.appLogo = res;
+                    handleFileInputToBase64('setAgencyLogo', (res) => { if(res) state.settings.agencyLogo = res;
+                        handleFileInputToBase64('setFavicon', (res) => { if(res) state.settings.favicon = res;
+                            handleFileInputToBase64('setLoginBg', (res) => { if(res) state.settings.loginBg = res;
+                                saveState(); applyBranding(); showLoading(false); showToast('Berhasil', 'Pengaturan Diperbarui!');
+                            });
+                        });
+                    });
+                });
+            };
+            saveFiles();
+        }
+
+        // --- NAVIGATION & UI HELPERS ---
+        function navigate(view) {
+            document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`view-${view}`).classList.remove('hidden');
+            window.scrollTo(0,0);
+            if (view === 'dashboard') renderAdminDashboard();
+            if (view === 'settings') renderSettings();
+        }
+        function showLoading(show = true) { document.getElementById('loading-overlay').style.display = show ? 'flex' : 'none'; }
+        function showToast(title, text, icon = 'success') { Swal.fire({ title, text, icon, confirmButtonColor: state.settings.primaryColor }); }
+
+        // --- 4. FORM LOGIC ---
+        function handleEducationChange() {
+            const level = document.getElementById('educationLevel').value; const container = document.getElementById('dynamicFields');
+            container.innerHTML = ''; container.classList.add('hidden'); if (!level) return; let html = '';
+            const cities = ["Jakarta Pusat", "Jakarta Utara", "Jakarta Barat", "Jakarta Selatan", "Jakarta Timur", "Kepulauan Seribu", "Lainnya"];
+            if (level === 'Belum Sekolah' || level === 'LPK') {
+                html += `<div class="mb-4"><label class="block text-sm font-medium text-gray-700 mb-1">Kota/Kabupaten Domisili</label><select name="city" id="citySelect" class="w-full p-2 border rounded bg-white" onchange="checkCity()">${cities.map(c => `<option value="${c}">${c}</option>`).join('')}</select></div>`;
+                if (level === 'Belum Sekolah') {
+                    html += `<div class="mb-4"><label class="block text-sm font-medium text-gray-700 mb-1">Alamat Tempat Tinggal</label><input type="text" name="address" class="w-full p-2 border rounded"></div>`;
+                } else if (level === 'LPK') {
+                    html += `<div class="mb-4"><label class="block text-sm font-medium text-gray-700 mb-1">Nama Lembaga</label><input type="text" name="institutionName" class="w-full p-2 border rounded"></div><div class="mb-4"><label class="block text-sm font-medium text-gray-700 mb-1">Alamat Lembaga</label><input type="text" name="address" class="w-full p-2 border rounded"></div>`;
+                }
+            } else {
+                html += `<div class="mb-4"><label class="block text-sm font-medium text-gray-700 mb-1">Nomor NPSN Sekolah</label><div class="relative"><input type="text" name="npsn" id="npsnInput" class="w-full p-2 border rounded pr-10" placeholder="Masukkan NPSN..." oninput="searchNPSN()"><i class="fa-solid fa-search absolute right-3 top-3 text-gray-400"></i></div><ul id="npsnSuggestions" class="absolute z-10 w-full bg-white border border-gray-300 rounded mt-1 max-h-40 overflow-y-auto hidden shadow-lg"></ul></div><div class="mb-4"><label class="block text-sm font-medium text-gray-700 mb-1">Nama Sekolah</label><input type="text" name="schoolName" id="schoolNameInput" class="w-full p-2 border rounded bg-gray-100" readonly placeholder="Otomatis terisi dari NPSN"><input type="hidden" name="schoolNameManual" id="schoolNameManual" placeholder="Isi manual jika tidak ditemukan"><p id="manualSchoolLink" class="text-xs text-blue-600 mt-1 cursor-pointer hidden underline" onclick="enableManualSchool()">Sekolah tidak ditemukan? Klik di sini.</p></div>`;
+            }
+            container.innerHTML = html; container.classList.remove('hidden');
+        }
+
+        function searchNPSN() {
+            const val = document.getElementById('npsnInput').value; const ul = document.getElementById('npsnSuggestions'); const manualLink = document.getElementById('manualSchoolLink');
+            if (val.length < 3) { ul.classList.add('hidden'); return; }
+            const matches = state.schools.filter(s => s.npsn.includes(val) || s.name.toLowerCase().includes(val.toLowerCase()));
+            ul.innerHTML = '';
+            if (matches.length > 0) {
+                matches.slice(0, 5).forEach(m => {
+                    const li = document.createElement('li'); li.className = "p-2 hover:bg-blue-50 cursor-pointer text-sm border-b last:border-0";
+                    li.innerHTML = `<strong>${m.npsn}</strong> - ${m.name}`;
+                    li.onclick = () => { document.getElementById('npsnInput').value = m.npsn; document.getElementById('schoolNameInput').value = m.name; ul.classList.add('hidden'); };
+                    ul.appendChild(li);
+                });
+                ul.classList.remove('hidden'); manualLink.classList.add('hidden');
+            } else { ul.classList.add('hidden'); manualLink.classList.remove('hidden'); }
+        }
+
+        function enableManualSchool() {
+            document.getElementById('schoolNameInput').removeAttribute('readonly');
+            document.getElementById('schoolNameInput').classList.remove('bg-gray-100');
+            document.getElementById('schoolNameInput').focus(); document.getElementById('schoolNameInput').value = '';
+        }
+        function checkCity() {} 
+        function handlePurposeChange() {}
+        function toggleFileUpload(show) {
+            const section = document.getElementById('fileUploadSection'); const input = document.getElementById('historyFile');
+            if (show) { section.classList.remove('hidden'); input.setAttribute('required', 'true'); } 
+            else { section.classList.add('hidden'); input.removeAttribute('required'); }
+        }
+
+        // --- 5. SUBMISSION HANDLING (WITH CLOUD) ---
+        async function handleFormSubmit(e) {
+            e.preventDefault(); showLoading(true); const formData = new FormData(e.target); const data = Object.fromEntries(formData.entries());
+            const phoneRegex = /^(\+62|62|0)8[1-9][0-9]{6,9}$/;
+            if (!phoneRegex.test(data.phone)) { showLoading(false); showToast('Error', 'Nomor HP tidak valid', 'error'); return; }
+            const level = data.educationLevel; let isRejected = false; let rejectionReason = "";
+            if ((level === 'Belum Sekolah' || level === 'LPK') && data.city === 'Lainnya') { isRejected = true; rejectionReason = "Ditolak Wilayah"; }
+
+            // Proses File Upload ke Drive (Jika ada)
+            let driveFileUrl = null;
+            if (data.hasHistory === 'Ya' && GOOGLE_SCRIPT_URL) {
+                const fileInput = document.getElementById('historyFile');
+                if (fileInput.files.length > 0) {
+                    // Generate nama folder: YYYY/MM
+                    const now = new Date();
+                    const folderPath = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}`;
+                    // Generate nama file: Tgl_NamaPendaftar_JenisDokumen
+                    const cleanName = data.parentName.replace(/[^a-zA-Z0-9]/g, '');
+                    const fileName = `${data.studentName}_${cleanName}_HistoryTes`;
+                    
+                    driveFileUrl = await uploadFileToDrive(fileInput.files[0], folderPath);
+                }
+            }
+
+            // Jika gagal upload dan ada requirement upload, batalkan
+            if (data.hasHistory === 'Ya' && GOOGLE_SCRIPT_URL && !driveFileUrl) {
+                showLoading(false); showToast('Gagal', 'Gagal mengupload file ke Drive. Silakan coba lagi.', 'error'); return;
+            }
+
+            let queueNumber = null;
+            if (data.purpose === 'Tes Intelegensi (IQ)') { queueNumber = state.queueCounter++; saveState(); }
+            
+            // Simpan data Drive Link ke state
+            if (driveFileUrl) data.driveFileLink = driveFileUrl;
+
+            const submission = {
+                id: Date.now().toString(), 
+                createdAt: new Date().toISOString(), 
+                status: isRejected ? rejectionReason : 'Menunggu Konfirmasi', 
+                queueNumber: queueNumber, 
+                data: data, 
+                fileName: data.hasHistory === 'Ya' ? (document.getElementById('historyFile').files[0] || {}).name : null,
+                isDeleted: false, // Soft delete flag
+                isPurposeEdited: false, // Flag edit admin
+                auditLog: [] // Log aktivitas
+            };
+
+            // Simpan ke Spreadsheet
+            if (GOOGLE_SCRIPT_URL) {
+                const sheetSuccess = await saveToSpreadsheet(submission);
+                if (!sheetSuccess) {
+                    showLoading(false); showToast('Gagal', 'Gagal menyimpan ke Database Server.', 'error'); return;
+                }
+            }
+
+            state.submissions.push(submission); saveState(); showLoading(false);
+            if (isRejected) { Swal.fire({ title: 'Mohon Maaf', html: 'Layanan hanya melayani wilayah DKI Jakarta.', icon: 'warning', confirmButtonColor: '#d33' }); } 
+            else { Swal.fire({ title: 'Pendaftaran Berhasil', text: 'Mohon menunggu admin menghubungi anda.', icon: 'success', confirmButtonColor: state.settings.primaryColor }); }
+            e.target.reset(); document.getElementById('dynamicFields').innerHTML = ''; document.getElementById('dynamicFields').classList.add('hidden');
+        }
+
+        // --- 6. ADMIN PANEL LOGIC ---
+        function checkAdminAccess() { state.isAdmin ? navigate('dashboard') : navigate('login'); }
+        function handleAdminLogin(e) {
+            e.preventDefault(); const u = document.getElementById('adminUser').value; const p = document.getElementById('adminPass').value;
+            if (u === 'uldselaras' && p === 'uldselaras123') { state.isAdmin = true; sessionStorage.setItem(ADMIN_SESSION_KEY, 'true'); navigate('dashboard'); } 
+            else { showToast('Gagal', 'Username atau password salah', 'error'); }
+        }
+        function logoutAdmin() { state.isAdmin = false; sessionStorage.removeItem(ADMIN_SESSION_KEY); navigate('home'); }
+
+        function renderAdminDashboard() {
+            if (!state.isAdmin) return navigate('login');
+            const s = state.submissions.filter(x => !x.isDeleted); // Filter soft delete
+            document.getElementById('stat-selesai').innerText = s.filter(x => x.status === 'Selesai').length;
+            document.getElementById('stat-proses').innerText = s.filter(x => x.status === 'Proses').length;
+            document.getElementById('stat-cancel').innerText = s.filter(x => x.status.startsWith('Cancel')).length;
+            document.getElementById('stat-terjadwal').innerText = s.filter(x => x.status === 'Terjadwal').length;
+            document.getElementById('stat-menunggu').innerText = s.filter(x => x.status === 'Menunggu Konfirmasi').length;
+            const iqPending = s.filter(x => x.data.purpose === 'Tes Intelegensi (IQ)' && x.status !== 'Selesai' && !x.status.startsWith('Cancel')).length;
+            document.getElementById('stat-antrian').innerText = iqPending;
+            renderAdminTable();
+        }
+
+        function renderAdminTable(filterStatus = 'all') {
+            state.currentFilter = filterStatus;
+            const tbody = document.getElementById('adminTableBody'); tbody.innerHTML = '';
+            let data = state.submissions.filter(x => !x.isDeleted).sort((a,b) => b.id - a.id); // Filter soft delete
+            if (filterStatus !== 'all') data = data.filter(item => item.status === filterStatus);
+            if (data.length === 0) { tbody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-gray-500">Tidak ada data.</td></tr>`; return; }
+            data.forEach(item => {
+                const dob = new Date(item.data.dob); const diff_ms = Date.now() - dob.getTime(); const age_dt = new Date(diff_ms); const age = Math.abs(age_dt.getUTCFullYear() - 1970);
+                let origin = item.data.schoolName || '-';
+                if (item.data.educationLevel === 'LPK') { origin = item.data.institutionName || '-'; } 
+                else if (item.data.educationLevel === 'Belum Sekolah') { origin = item.data.city || '-'; }
+
+                let iqBadge = ''; if (item.queueNumber) iqBadge = `<br><span class="bg-purple-100 text-purple-800 text-xs px-2 py-0.5 rounded-full border border-purple-200 font-mono">Antrian: #${item.queueNumber}</span>`;
+                let editedBadge = ''; if (item.isPurposeEdited) editedBadge = `<span class="text-xs text-orange-600 italic block mt-1">Tujuan Disesuaikan Admin</span>`;
+
+                const tr = document.createElement('tr'); tr.className = "hover:bg-gray-50 border-b";
+                tr.innerHTML = `<td class="p-4 text-xs text-gray-500">${new Date(item.createdAt).toLocaleDateString('id-ID')}</td><td class="p-4 font-medium">${item.data.parentName}</td><td class="p-4">${item.data.phone}</td><td class="p-4"><div class="font-bold">${item.data.studentName}</div><div class="text-xs text-gray-500">${age} Thn • ${item.data.gender}</div></td><td class="p-4 text-sm">${origin}</td><td class="p-4 text-sm">${item.data.purpose}${iqBadge}${editedBadge}</td><td class="p-4"><span class="px-2 py-1 rounded text-xs font-bold ${getStatusColor(item.status)}">${item.status}</span></td><td class="p-4 text-center"><button onclick="openDetail('${item.id}')" class="bg-blue-100 text-blue-600 px-3 py-1 rounded hover:bg-blue-200 text-xs font-bold">Detail/Aksi</button></td>`;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function getStatusColor(status) {
+            if (status.startsWith('Cancel')) return 'bg-red-100 text-red-800';
+            switch(status) { case 'Selesai': return 'bg-green-100 text-green-800'; case 'Terjadwal': return 'bg-blue-100 text-blue-800'; case 'Proses': return 'bg-yellow-100 text-yellow-800'; default: return 'bg-gray-200 text-gray-800'; }
+        }
+
+        // --- 7. DETAIL MODAL & ADMIN EDIT ---
+        function openDetail(id) {
+            const item = state.submissions.find(x => x.id === id); if (!item) return;
+            const modal = document.getElementById('actionModal'); const content = document.getElementById('modalContent');
+            let scheduleInputs = '';
+            if (item.status === 'Terjadwal' || item.status === 'Proses') scheduleInputs = `<div class="bg-blue-50 p-4 rounded-lg mb-4"><h4 class="font-bold text-blue-900 mb-2">Jadwal Saat Ini</h4><p>Hari/Tanggal: <span class="font-bold">${item.scheduleDate || '-'}</span></p><p>Jam: <span class="font-bold">${item.scheduleTime || '-'}</span></p><p>Tenaga Ahli: <span class="font-bold">${item.expert || '-'}</span></p></div>`;
+            let queueInfo = ''; if(item.queueNumber) queueInfo = `<p><strong>Nomor Antrian Internal:</strong> <span class="text-purple-700 font-mono text-lg bg-purple-100 px-2 py-1 rounded">#${item.queueNumber}</span></p>`;
+            let detailOrigin = item.data.schoolName || item.data.city || '-'; if (item.data.educationLevel === 'LPK') detailOrigin = item.data.institutionName || '-';
+
+            // --- ADMIN EDIT SECTION (Restricted) ---
+            // Date Format: YYYY-MM-DDTHH:mm for input type="datetime-local"
+            const createdAtLocal = new Date(item.createdAt);
+            createdAtLocal.setMinutes(createdAtLocal.getMinutes() - createdAtLocal.getTimezoneOffset());
+            const createdAtString = createdAtLocal.toISOString().slice(0, 16);
+
+            content.innerHTML = `<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6 text-sm"><div><h4 class="font-bold text-gray-500 uppercase text-xs mb-1">Data Pendaftar</h4><p><strong>Nama:</strong> ${item.data.parentName} (${item.data.role})</p><p><strong>HP:</strong> ${item.data.phone}</p><p><strong>Email:</strong> ${item.data.email}</p></div><div><h4 class="font-bold text-gray-500 uppercase text-xs mb-1">Data Peserta Didik</h4><p><strong>Nama:</strong> ${item.data.studentName}</p><p><strong>Usia/JK:</strong> ${item.data.dob} / ${item.data.gender}</p><p><strong>Jenjang:</strong> ${item.data.educationLevel}</p></div><div><h4 class="font-bold text-gray-500 uppercase text-xs mb-1">Asal Sekolah/Instansi</h4><p>${detailOrigin}</p><p>NPSN: ${item.data.npsn || '-'}</p><p>Alamat: ${item.data.address || '-'}</p></div><div><h4 class="font-bold text-gray-500 uppercase text-xs mb-1">Konsultasi</h4><p><strong>Tujuan:</strong> ${item.data.purpose}</p>${queueInfo}<p><strong>File:</strong> ${item.data.driveFileLink ? `<a href="${item.data.driveFileLink}" target="_blank" class="text-blue-600 underline"><i class="fa-solid fa-file"></i> Buka di Drive</a>` : (item.fileName ? `<span class="text-gray-500">${item.fileName} (Local)</span>` : 'Tidak ada')}</p></div><div class="md:col-span-2"><h4 class="font-bold text-gray-500 uppercase text-xs mb-1">Uraian Masalah</h4><p class="bg-gray-50 p-2 rounded italic">"${item.data.problemDesc}"</p></div></div>${scheduleInputs}<div class="border-t pt-4"><h4 class="font-bold mb-3">Update Status & Edit Admin</h4><div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div class="space-y-3">
+            
+            <!-- EDIT ADMIN (Date & Purpose) -->
+            <div class="p-3 bg-yellow-50 border border-yellow-200 rounded">
+                <p class="text-xs font-bold text-yellow-800 mb-2 uppercase">Hak Edit Admin (Terbatas)</p>
+                <div class="mb-2"><label class="block text-xs font-medium mb-1">Ubah Tanggal Daftar</label><input type="datetime-local" id="editDate" value="${createdAtString}" class="w-full p-2 border rounded text-sm"></div>
+                <div><label class="block text-xs font-medium mb-1">Ubah Tujuan Konsultasi</label><input type="text" id="editPurpose" value="${item.data.purpose}" class="w-full p-2 border rounded text-sm"></div>
+            </div>
+
+            <div class="mt-2">
+                <label class="block text-sm font-medium mb-1">Update Status Sistem</label>
+                <select id="newStatus" class="w-full p-2 border rounded" onchange="toggleStatusFields('${item.id}')"><option value="Menunggu Konfirmasi" ${item.status === 'Menunggu Konfirmasi' ? 'selected' : ''}>Menunggu Konfirmasi</option><option value="Terjadwal" ${item.status === 'Terjadwal' ? 'selected' : ''}>Terjadwal</option><option value="Proses" ${item.status === 'Proses' ? 'selected' : ''}>Proses</option><option value="Selesai" ${item.status === 'Selesai' ? 'selected' : ''}>Selesai</option><option value="Cancel" ${item.status.startsWith('Cancel') ? 'selected' : ''}>Cancel</option></select>
+                <div id="scheduleFields" class="hidden space-y-2 mt-2"><input type="text" id="schDate" placeholder="Hari, Tanggal" class="w-full p-2 border rounded text-sm"><input type="text" id="schTime" placeholder="Jam" class="w-full p-2 border rounded text-sm"><input type="text" id="schExpert" placeholder="Nama Tenaga Ahli" class="w-full p-2 border rounded text-sm"></div><div id="cancelReasonField" class="hidden"><input type="text" id="cancelReason" placeholder="Alasan Pembatalan" class="w-full p-2 border rounded text-sm"></div>
+            </div>
+
+            <button onclick="updateStatus('${item.id}')" class="w-full bg-brand-primary text-white py-2 rounded font-bold hover-brand-primary transition-colors duration-300">Simpan Perubahan</button>
+            
+            <button onclick="softDelete('${item.id}')" class="w-full border border-red-500 text-red-500 py-2 rounded font-medium hover:bg-red-50 mt-2">Hapus Data (Soft Delete)</button>
+            </div>
+            <div class="flex flex-col justify-center items-center border-l pl-4"><button onclick="generatePDF('${item.id}')" class="w-full bg-red-600 text-white py-3 rounded font-bold hover:bg-red-700 flex items-center justify-center gap-2"><i class="fa-solid fa-file-pdf text-xl"></i> Download Surat PDF</button><p class="text-xs text-gray-500 mt-2 text-center">Menggunakan identitas instansi yang telah diatur.</p></div>
+            </div>
+            </div>`;
+            modal.classList.remove('hidden'); toggleStatusFields(id);
+        }
+
+        function closeModal() { document.getElementById('actionModal').classList.add('hidden'); }
+        function toggleStatusFields(id) {
+            const status = document.getElementById('newStatus').value; const schFields = document.getElementById('scheduleFields'); const cancelField = document.getElementById('cancelReasonField');
+            if (status === 'Terjadwal' || status === 'Proses') { schFields.classList.remove('hidden'); cancelField.classList.add('hidden'); } 
+            else if (status === 'Cancel') { schFields.classList.add('hidden'); cancelField.classList.remove('hidden'); } 
+            else { schFields.classList.add('hidden'); cancelField.classList.add('hidden'); }
+        }
+
+        // Soft Delete Logic
+        function softDelete(id) {
+            Swal.fire({
+                title: 'Apakah Anda yakin?',
+                text: "Data yang dihapus tidak dapat dikembalikan.",
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                cancelButtonColor: '#3085d6',
+                confirmButtonText: 'Ya, Hapus!',
+                cancelButtonText: 'Batal'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    const itemIndex = state.submissions.findIndex(x => x.id === id);
+                    if (itemIndex !== -1) {
+                        state.submissions[itemIndex].isDeleted = true;
+                        state.submissions[itemIndex].auditLog.push(`Soft Deleted by Admin on ${new Date().toISOString()}`);
+                        saveState();
+                        closeModal();
+                        renderAdminDashboard();
+                        showToast('Terhapus', 'Data telah dipindahkan ke arsip.', 'success');
+                    }
+                }
+            });
+        }
+
+        function updateStatus(id) {
+            const newStatus = document.getElementById('newStatus').value; 
+            const editDateVal = document.getElementById('editDate').value;
+            const editPurposeVal = document.getElementById('editPurpose').value;
+            
+            const itemIndex = state.submissions.findIndex(x => x.id === id);
+            if (itemIndex === -1) return; 
+            const item = state.submissions[itemIndex];
+
+            // Update Date
+            if (editDateVal) {
+                item.createdAt = new Date(editDateVal).toISOString();
+            }
+
+            // Update Purpose
+            if (editPurposeVal && editPurposeVal !== item.data.purpose) {
+                item.data.purpose = editPurposeVal;
+                item.isPurposeEdited = true;
+                item.auditLog.push(`Tujuan diubah dari lama ke "${editPurposeVal}" oleh Admin`);
+            }
+
+            // Update Status
+            if (newStatus === 'Cancel') { const reason = document.getElementById('cancelReason').value; if (!reason) return showToast('Error', 'Alasan pembatalan wajib diisi', 'error'); item.status = `Cancel (${reason})`; } 
+            else { item.status = newStatus; }
+            
+            if (document.getElementById('schDate')) { item.scheduleDate = document.getElementById('schDate').value; item.scheduleTime = document.getElementById('schTime').value; item.expert = document.getElementById('schExpert').value; }
+            
+            saveState(); closeModal(); renderAdminDashboard(); showToast('Berhasil', 'Status diperbarui');
+        }
+
+        // --- 8. EXPORT MODAL & LOGIC ---
+        function openExportModal() { document.getElementById('exportModal').classList.remove('hidden'); }
+        function closeExportModal() { document.getElementById('exportModal').classList.add('hidden'); }
+        function selectExportMode(mode) {
+            document.getElementById('dateRangeContainer').classList.toggle('hidden', mode !== 'all');
+            document.querySelector(`input[name="exportMode"][value="${mode}"]`).checked = true;
+        }
+
+        // ==========================================
+        // 9. FUNGSI PDF BULK (F4 LANDSCAPE)
+        // ==========================================
+        function generateBulkPDF() {
+            const mode = document.querySelector('input[name="exportMode"]:checked').value;
+            let data = [];
+            if (mode === 'filtered') {
+                data = state.submissions.filter(item => { if (state.currentFilter === 'all') return true; return item.status === state.currentFilter; }).sort((a,b) => a.id - b.id);
+            } else {
+                data = [...state.submissions].sort((a,b) => a.id - b.id);
+                const startStr = document.getElementById('exportDateStart').value; const endStr = document.getElementById('exportDateEnd').value;
+                if (startStr || endStr) {
+                    const start = startStr ? new Date(startStr).getTime() : 0;
+                    const end = endStr ? new Date(endStr).getTime() : Infinity;
+                    data = data.filter(item => { const time = new Date(item.createdAt).getTime(); return time >= start && time <= end; });
+                }
+            }
+            if (data.length === 0) { showToast('Info', 'Tidak ada data untuk diekspor.', 'info'); return; }
+            closeExportModal(); showLoading(true);
+            
+            const { jsPDF } = window.jspdf;
+            // --- F4 LANDSCAPE: 330mm (Width) x 210mm (Height) ---
+            const doc = new jsPDF('l', 'mm', [330, 210]); 
+            const settings = state.settings;
+            const PAGE_WIDTH = 330;
+            const PAGE_HEIGHT = 210;
+            const MARGIN = 10; 
+            let HEADER_HEIGHT = 40;
+
+            // Footer Calculation
+            const FOOTER_FONT_SIZE = 8;
+            const FOOTER_LINE_HEIGHT = 4;
+            const FOOTER_MARGIN_BOTTOM = 10;
+            doc.setFontSize(FOOTER_FONT_SIZE);
+            const splitFooterText = doc.splitTextToSize(settings.footerText, PAGE_WIDTH - (MARGIN * 2));
+            const footerLineCount = splitFooterText.length;
+            const totalFooterHeight = (footerLineCount * FOOTER_LINE_HEIGHT) + 4;
+            const tableBottomMargin = totalFooterHeight + 8;
+
+            // 1. Header Logic (Only Page 1 for Kop Surat)
+            // Using didDrawPage hook for logic, but we set basic here
+            const tableHead = [['No', 'Tgl Daftar', 'Layanan', 'Pendaftar', 'No HP', 'Anak', 'Usia', 'Asal', 'Tujuan', 'Status', 'Antrian', 'Ket']];
+            const hex = state.settings.primaryColor;
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+
+            const tableBody = data.map((item, index) => {
+                const dob = new Date(item.data.dob); const age = new Date().getFullYear() - dob.getFullYear();
+                let origin = item.data.schoolName || item.data.city || "-";
+                if (item.data.educationLevel === 'LPK') origin = item.data.institutionName || origin;
+                let ket = "";
+                if (item.status === 'Terjadwal' || item.status === 'Proses') ket = `${item.scheduleDate || ''} ${item.scheduleTime || ''}`;
+                if (item.status.startsWith('Cancel')) ket = item.status;
+                return [index + 1, new Date(item.createdAt).toLocaleDateString('id-ID'), item.data.serviceType || '-', item.data.parentName, `'${item.data.phone}`, item.data.studentName, `${age} Thn`, origin, item.data.purpose, item.status, item.queueNumber || '-', ket];
+            });
+
+            doc.autoTable({
+                head: tableHead,
+                body: tableBody,
+                startY: HEADER_HEIGHT + 10,
+                margin: { top: HEADER_HEIGHT + 10, left: MARGIN, right: MARGIN, bottom: tableBottomMargin },
+                theme: 'grid',
+                styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' }, // Text wrapping
+                headStyles: { fillColor: [r, g, b], textColor: 255, halign: 'center', fontStyle: 'bold' },
+                columnStyles: { 
+                    0: {cellWidth: 12, halign: 'center'}, 
+                    1: {cellWidth: 25}, 
+                    2: {cellWidth: 20}, 
+                    3: {cellWidth: 40}, 
+                    4: {cellWidth: 30}, 
+                    5: {cellWidth: 30}, 
+                    6: {cellWidth: 15, halign: 'center'}, 
+                    7: {cellWidth: 30}, 
+                    8: {cellWidth: 35}, 
+                    9: {cellWidth: 25}, 
+                    10: {cellWidth: 15, halign: 'center'}, 
+                    11: {cellWidth: 30}
+                },
+                didDrawPage: function (data) {
+                    const pageWidth = doc.internal.pageSize.getWidth();
+                    const pageHeight = doc.internal.pageSize.getHeight();
+                    const lastLineY = pageHeight - FOOTER_MARGIN_BOTTOM;
+                    const startFooterY = lastLineY - ((footerLineCount - 1) * FOOTER_LINE_HEIGHT);
+
+                    // --- HEADER (Kop Surat Only Page 1) ---
+                    if (data.pageNumber === 1) {
+                        if (settings.pdfTemplate) {
+                            doc.addImage(settings.pdfTemplate, 'JPEG', 0, 0, 330, 210);
+                        } else if (settings.agencyLogo) {
+                            doc.addImage(settings.agencyLogo, 'JPEG', MARGIN, MARGIN, 30, 30);
+                            doc.setFontSize(14); doc.setFont("helvetica", "bold"); doc.setTextColor(40, 40, 40);
+                            doc.text(settings.appName.toUpperCase(), MARGIN + 35, MARGIN + 10);
+                            doc.setFontSize(9); doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
+                            doc.text(settings.appTagline, MARGIN + 35, MARGIN + 16);
+                        } else {
+                            doc.setFontSize(16); doc.setFont("helvetica", "bold"); doc.setTextColor(40, 40, 40);
+                            doc.text(settings.appName.toUpperCase(), pageWidth / 2, 25, { align: "center" });
+                            doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
+                            doc.text(settings.appTagline, pageWidth / 2, 32, { align: "center" });
+                        }
+                    } else {
+                        // Simple Header for subsequent pages
+                        doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(0,0,0);
+                        doc.text("LAPORAN RIWAYAT KONSULTASI (LANJUTAN)", pageWidth / 2, 15, { align: "center" });
+                    }
+
+                    // --- FOOTER (All Pages) ---
+                    doc.setDrawColor(200, 200, 200);
+                    doc.line(MARGIN, startFooterY - 3, pageWidth - MARGIN, startFooterY - 3);
+                    
+                    doc.setFontSize(FOOTER_FONT_SIZE); doc.setFont("helvetica", "normal"); doc.setTextColor(100, 100, 100);
+                    for (let i = 0; i < footerLineCount; i++) {
+                        const currentLineY = startFooterY + (i * FOOTER_LINE_HEIGHT);
+                        doc.text(splitFooterText[i], pageWidth / 2, currentLineY, { align: "center" });
+                    }
+
+                    doc.setFontSize(7); doc.setFont("helvetica", "normal"); doc.setTextColor(100, 100, 100);
+                    doc.text(`Hal ${data.pageNumber}`, pageWidth - MARGIN, startFooterY - 3, { align: "right" });
+                    doc.text(`Cetak: ${new Date().toLocaleDateString('id-ID')}`, MARGIN + 2, startFooterY - 3, { align: "left" });
+                }
+            });
+
+            doc.save(`Laporan_F4_${new Date().toLocaleDateString('id-ID').replace(/\//g, '_')}.pdf`); 
+            showLoading(false);
+        }
+
+        // ==========================================
+        // 10. FUNGSI PDF SINGLE (1 PAGE FIT + FILE)
+        // ==========================================
+        function generatePDF(id) {
+            showLoading(true); 
+            const { jsPDF } = window.jspdf; 
+            const doc = new jsPDF('p', 'mm', 'a4'); // Tetap A4 untuk individual
+            const item = state.submissions.find(x => x.id === id); 
+            if (!item) return;
+            
+            const settings = state.settings;
+            const PAGE_WIDTH = 210;
+            const PAGE_HEIGHT = 297;
+            const MARGIN = 20;
+
+            // Footer Calculation
+            const FOOTER_FONT_SIZE = 9;
+            const FOOTER_LINE_HEIGHT = 5;
+            const FOOTER_MARGIN_BOTTOM = 10;
+            doc.setFontSize(FOOTER_FONT_SIZE);
+            const splitFooterText = doc.splitTextToSize(settings.footerText, PAGE_WIDTH - (MARGIN * 2));
+            const footerLineCount = splitFooterText.length;
+            const lastLineFooterY = PAGE_HEIGHT - FOOTER_MARGIN_BOTTOM;
+            const startFooterY = lastLineFooterY - ((footerLineCount - 1) * FOOTER_LINE_HEIGHT) - 4;
+            const PAGE_BREAK_LIMIT = startFooterY - 15; 
+
+            // --- AUTO FONT SCALING LOGIC ---
+            let baseFontSize = 11;
+            let contentFits = false;
+            
+            // Helper calc height
+            const calcHeight = (fs) => {
+                doc.setFontSize(fs);
+                let h = 0;
+                const lineHeight = fs * 0.4 + 2; // approx
+                const fields = [
+                    `Tgl Daftar: ${new Date(item.createdAt).toLocaleString('id-ID')}`,
+                    `Nama Pendaftar: ${item.data.parentName}`,
+                    `Peran: ${item.data.role}`,
+                    `No HP: ${item.data.phone}`,
+                    `Email: ${item.data.email}`,
+                    `Nama Anak: ${item.data.studentName}`,
+                    `Tgl Lahir: ${item.data.dob}`,
+                    `Jenis Kelamin: ${item.data.gender}`,
+                    `Jenjang: ${item.data.educationLevel}`,
+                    `Asal Sekolah: ${item.data.schoolName || item.data.city || "-"}`,
+                    `Alamat: ${item.data.address || "-"}`,
+                    `Tujuan: ${item.data.purpose}`,
+                    `Status: ${item.status}`
+                ];
+                fields.forEach(txt => {
+                    const lines = doc.splitTextToSize(txt, 130);
+                    h += Math.max(lines.length, 1) * lineHeight + 2;
+                });
+                // Add header & desc height roughly
+                h += 50; 
+                return h;
+            };
+
+            // Reduce font size until fits
+            while (baseFontSize > 6) {
+                if (calcHeight(baseFontSize) < PAGE_BREAK_LIMIT) {
+                    contentFits = true;
+                    break;
+                }
+                baseFontSize -= 0.5;
+            }
+            if (!contentFits) baseFontSize = 6; // Min limit
+
+            // 1. HEADER
+            let HEADER_HEIGHT = 50;
+            if (settings.pdfTemplate) {
+                doc.addImage(settings.pdfTemplate, 'JPEG', 0, 0, PAGE_WIDTH, PAGE_HEIGHT);
+                HEADER_HEIGHT = 60; 
+            } else if (settings.agencyLogo) {
+                doc.addImage(settings.agencyLogo, 'JPEG', MARGIN, MARGIN, 35, 35);
+                doc.setFontSize(16); doc.setFont("helvetica", "bold"); doc.setTextColor(40, 40, 40);
+                doc.text(settings.appName, MARGIN + 40, MARGIN + 15);
+                doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
+                doc.text(settings.appTagline, MARGIN + 40, MARGIN + 22);
+                doc.setDrawColor(200, 200, 200); doc.line(MARGIN, MARGIN + 40, PAGE_WIDTH - MARGIN, MARGIN + 40);
+                HEADER_HEIGHT = 50;
+            } else {
+                doc.setFontSize(18); doc.setFont("helvetica", "bold"); doc.setTextColor(40, 40, 40);
+                doc.text(settings.appName.toUpperCase(), PAGE_WIDTH / 2, 30, { align: "center" });
+                doc.setFontSize(12); doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
+                doc.text(settings.appTagline, PAGE_WIDTH / 2, 40, { align: "center" });
+                doc.setDrawColor(200, 200, 200); doc.line(MARGIN, 50, PAGE_WIDTH - MARGIN, 50);
+                HEADER_HEIGHT = 55;
+            }
+
+            doc.setFontSize(14); doc.setFont("helvetica", "bold"); doc.setTextColor(0,0,0);
+            doc.text("BUKTI PENDAFTARAN KONSULTASI", PAGE_WIDTH / 2, HEADER_HEIGHT + 10, { align: "center" });
+            
+            let currentY = HEADER_HEIGHT + 20; 
+            const leftCol = MARGIN;
+            const lineHeight = baseFontSize * 0.4 + 2;
+
+            // Helper Add Row
+            const addRow = (label, val) => {
+                doc.setFontSize(baseFontSize); doc.setFont("helvetica", "normal");
+                const splitVal = doc.splitTextToSize(val, 80);
+                const lines = splitVal.length;
+                doc.setFont("helvetica", "bold"); doc.text(label, leftCol, currentY);
+                doc.setFont("helvetica", "normal"); doc.text(splitVal, leftCol + 40, currentY);
+                currentY += (lines * lineHeight) + 2;
+            };
+
+            // 2. CONTENT
+            if (item.queueNumber) {
+                doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(255, 50, 50);
+                doc.text(`NO. ANTRIAN IQ: ${item.queueNumber}`, PAGE_WIDTH - MARGIN, currentY, { align: "right" });
+                currentY += 10;
+            }
+
+            doc.setTextColor(0,0,0);
+            addRow("Tgl Daftar", new Date(item.createdAt).toLocaleString('id-ID'));
+            addRow("Nama Pendaftar", item.data.parentName);
+            addRow("Peran", item.data.role);
+            addRow("No HP", item.data.phone);
+            addRow("Email", item.data.email);
+            currentY += 5; doc.setFont("helvetica", "bold"); doc.text("Data Peserta Didik", leftCol, currentY); currentY += 8;
+            addRow("Nama Anak", item.data.studentName);
+            addRow("Tgl Lahir", item.data.dob);
+            addRow("Jenis Kelamin", item.data.gender);
+            addRow("Jenjang", item.data.educationLevel);
+            let pdfOrigin = item.data.schoolName || item.data.city || "-";
+            if(item.data.educationLevel === 'LPK') pdfOrigin = item.data.institutionName || "-";
+            addRow("Asal Sekolah", pdfOrigin);
+            addRow("Alamat", item.data.address || "-");
+            currentY += 5; doc.setFont("helvetica", "bold"); doc.text("Detail Konsultasi", leftCol, currentY); currentY += 8;
+            addRow("Tujuan", item.data.purpose);
+            
+            const splitDesc = doc.splitTextToSize(item.data.problemDesc, 130);
+            doc.text("Uraian Masalah:", leftCol, currentY); currentY += 6;
+            doc.setFontSize(baseFontSize - 1); doc.setFont("italic", "normal");
+            doc.text(splitDesc, leftCol, currentY); currentY += (splitDesc.length * 6);
+            doc.setFontSize(baseFontSize); doc.setFont("normal", "normal"); 
+
+            currentY += 5; doc.setFont("helvetica", "bold"); doc.text("Status Saat Ini", leftCol, currentY); currentY += 8;
+            doc.setFont("helvetica", "normal");
+            addRow("Status", item.status);
+            if (item.status === 'Terjadwal' || item.status === 'Proses') {
+                addRow("Jadwal", (item.scheduleDate || '') + " " + (item.scheduleTime || ''));
+                addRow("Tenaga Ahli", item.expert || '-');
+            }
+
+            // 3. FOOTER
+            doc.setDrawColor(200, 200, 200);
+            doc.line(MARGIN, startFooterY, PAGE_WIDTH - MARGIN, startFooterY);
+            doc.setFontSize(FOOTER_FONT_SIZE); doc.setFont("helvetica", "normal"); doc.setTextColor(100, 100, 100);
+            for (let j = 0; j < footerLineCount; j++) {
+                const currentLineY = (startFooterY + 4) + (j * FOOTER_LINE_HEIGHT);
+                doc.text(splitFooterText[j], PAGE_WIDTH / 2, currentLineY, { align: "center" });
+            }
+
+            // 4. LAMPIRAN (PAGE 2) - Jika ada file
+            // Kita gunakan driveLink atau fileName
+            if (item.data.driveFileLink || item.fileName) {
+                doc.addPage();
+                // Bersihkan halaman (tanpa header/footer sistem)
+                doc.setFontSize(14); doc.setFont("helvetica", "bold"); doc.setTextColor(0,0,0);
+                doc.text("LAMPIRAN FILE", PAGE_WIDTH / 2, 40, { align: "center" });
+                
+                if (item.data.driveFileLink) {
+                    // Jika link ada, kita tidak bisa otomatis download gambar dari Drive tanpa fetch (masalah CORS).
+                    // Kita render placeholder/info atau coba fetch jika CORS diizinkan.
+                    doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(100, 100, 100);
+                    doc.text(`File tersimpan di Google Drive:`, 20, 70);
+                    doc.setTextColor(0, 0, 255);
+                    doc.text(item.data.driveFileLink, 20, 80);
+                    doc.setTextColor(0, 0, 0);
+                    doc.text("Silakan buka link di atas untuk melihat lampiran asli.", 20, 90);
+                } else if (item.fileName) {
+                    // Jika hanya ada nama (Local Storage mode)
+                    doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(100, 100, 100);
+                    doc.text(`Nama File: ${item.fileName}`, 20, 70);
+                    doc.text("(File asli tidak dapat ditampilkan secara langsung dalam PDF ini)", 20, 80);
+                }
+            }
+
+            doc.save(`Pendaftaran_${item.data.studentName.replace(/\s+/g, '_')}.pdf`); 
+            showLoading(false);
+        }
+
+        // --- OTHERS ---
+        function renderSettings() {
+            document.getElementById('totalSchools').innerText = state.schools.length;
+            if (state.settings.pdfTemplate) { document.getElementById('previewTemplate').innerHTML = `<img src="${state.settings.pdfTemplate}" class="w-full h-auto object-cover">`; document.getElementById('previewTemplate').classList.remove('hidden'); }
+        }
+        function processSchoolUpload(input) {
+            const file = input.files[0]; if (!file) return; const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'});
+                const firstSheet = workbook.Sheets[workbook.SheetNames[0]]; const jsonData = XLSX.utils.sheet_to_json(firstSheet, {header: 1});
+                const newSchools = []; for (let i = 1; i < jsonData.length; i++) { const row = jsonData[i]; if (row[0] && row[1]) newSchools.push({ npsn: String(row[0]), name: String(row[1]) }); }
+                if (newSchools.length > 0) { state.schools = newSchools; saveState(); showToast('Sukses', `${newSchools.length} data sekolah berhasil diimport!`); renderSettings(); } else { showToast('Gagal', 'Format file tidak dikenali', 'error'); }
+            }; reader.readAsArrayBuffer(file);
+        }
+        function savePdfTemplate() {
+            const input = document.getElementById('pdfTemplateUpload'); if (input.files && input.files[0]) {
+                const reader = new FileReader(); reader.onload = function(e) { state.settings.pdfTemplate = e.target.result; saveState(); renderSettings(); showToast('Sukses', 'Template PDF disimpan'); }; reader.readAsDataURL(input.files[0]);
+            }
+        }
+        function resetSystem() { if(confirm("Yakin reset?")) { localStorage.clear(); location.reload(); } }
+
+        window.onload = function() { applyBranding(); if(state.isAdmin) navigate('dashboard'); };
+    </script>
 </body>
 </html>
+
+<!-- 
+================================================================
+INSTRUKSI SETUP GOOGLE APPS SCRIPT (PENTING)
+================================================================
+
+Agar fitur Google Drive dan Spreadsheet berfungsi, ikuti langkah ini:
+
+1. Buka Google Spreadsheet baru (Data Utama).
+2. Buka Extensions > Apps Script.
+3. Hapus kode default, paste kode di bawah ini:
+4. Ubah `FOLDER_ID_DRIVE` dengan ID Folder Drive Anda.
+5. Klik Deploy > New Deployment > Select type: Web App.
+6. Description: SELARAS API, Execute as: Me, Who has access: Anyone.
+7. Klik Deploy.
+8. Salin URL Web App (https://script.google.com/...) dan tempel ke variabel `GOOGLE_SCRIPT_URL` di file HTML ini.
+
+===============================================================
+KODE GOOGLE APPS SCRIPT (Code.gs)
+===============================================================
+
+const FOLDER_ID_DRIVE = 'GANTI_DENGAN_ID_FOLDER_DRIVE_ANDA';
+const SHEET_ID = SpreadsheetApp.getActiveSpreadsheet().getId();
+const SHEET_NAME = 'Sheet1';
+
+function doPost(e) {
+  const data = JSON.parse(e.postData.contents);
+  const action = data.action;
+  
+  if (action === 'uploadFile') {
+    return uploadFile(data);
+  } else if (action === 'appendSheet') {
+    return appendSheet(data);
+  }
+  
+  return ContentService.createTextOutput(JSON.stringify({status: 'error', message: 'Invalid Action'}));
+}
+
+function uploadFile(data) {
+  try {
+    const folder = DriveApp.getFolderById(FOLDER_ID_DRIVE);
+    const subFolderName = data.folderPath.split('/')[0] || 'Root';
+    let subFolder = folder.getFoldersByName(subFolderName).hasNext() 
+      ? folder.getFoldersByName(subFolderName).next() 
+      : folder.createFolder(subFolderName);
+    
+    const decoded = Utilities.base64Decode(data.data);
+    const blob = Utilities.newBlob(decoded, data.mimeType, data.fileName);
+    const file = subFolder.createFile(blob);
+    const fileUrl = file.getUrl();
+    
+    return ContentService.createTextOutput(JSON.stringify({status: 'success', fileUrl: fileUrl}));
+  } catch (e) {
+    return ContentService.createTextOutput(JSON.stringify({status: 'error', message: e.toString()}));
+  }
+}
+
+function appendSheet(data) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ss.getSheetByName(SHEET_NAME);
+    
+    const rowData = [
+      new Date().toLocaleDateString(),
+      data.id,
+      data.data.parentName,
+      data.data.phone,
+      data.data.studentName,
+      data.data.educationLevel,
+      data.data.purpose,
+      data.status,
+      data.queueNumber,
+      data.data.driveFileLink || '-'
+    ];
+    
+    sheet.appendRow(rowData);
+    return ContentService.createTextOutput(JSON.stringify({status: 'success'}));
+  } catch (e) {
+    return ContentService.createTextOutput(JSON.stringify({status: 'error', message: e.toString()}));
+  }
+}
+-->
