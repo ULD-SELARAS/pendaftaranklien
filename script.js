@@ -12,7 +12,7 @@ const ADMIN_SESSION_KEY = 'uld_admin_session';
 
 // --- KONFIGURASI INTEGRASI GOOGLE (WAJIB DIISI) ---
 // ⚠️ GANTI URL INI dengan URL Web App dari Google Apps Script Anda
-https://script.google.com/macros/s/AKfycbxJdvMXn1ZIV2DwIsSrUzWGLK3Fb8jkfIBROZbIgQwqmnsBaYnL2HvYxOkhYYDp7qvN/exec 
+https://script.google.com/macros/s/AKfycbzNa54WNPgS1yS-1aR1641a8wicP3Q86GFu2sNpHXD8hC-gNlZ9BjM8hFchumFSVLjr/exec 
 
 const defaultSettings = {
     appName: "SELARAS",
