@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="page-title">SELARAS - Unit Layanan Disabilitas</title>
+    <link id="dynamic-favicon" rel="icon" href="https://cdn-icons-png.flaticon.com/512/2997/2997258.png">
+    
+    <!-- Libraries (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        
+        :root {
+            --brand-primary: #1e3a8a;
+            --brand-secondary: #3b82f6;
+            --brand-bg: #f3f4f6;
+        }
+        
+        .bg-brand-primary { background-color: var(--brand-primary) !important; }
+        .text-brand-primary { color: var(--brand-primary) !important; }
+        .border-brand-primary { border-color: var(--brand-primary) !important; }
+        .bg-brand-secondary { background-color: var(--brand-secondary) !important; }
+        .hover-brand-primary:hover { background-color: var(--brand-primary) !important; }
+
+        #loading-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.9); z-index: 9999;
+            display: none; justify-content: center; align-items: center; flex-direction: column;
+        }
+        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid var(--brand-primary); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        input[type="color"] {
+            -webkit-appearance: none; border: none; width: 40px; height: 40px; border-radius: 50%; overflow: hidden; padding: 0; cursor: pointer;
+        }
+        input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+        input[type="color"]::-webkit-color-swatch { border: none; }
+    </style>
+</head>
+<body class="text-gray-800">
+
+    <div id="loading-overlay">
+        <div class="spinner mb-4"></div>
+        <p class="text-gray-600 font-semibold">Memproses Data...</p>
+    </div>
+
+    <!-- NAVBAR -->
+    <nav id="main-nav" class="bg-brand-primary text-white shadow-lg sticky top-0 z-50 transition-colors duration-300">
+        <div class="container mx-auto px-4 py-3 flex justify-between items-center">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="navigate('home')">
+                <img id="nav-logo-img" src="" class="h-8 w-8 object-contain hidden rounded bg-white p-0.5">
+                <i id="nav-logo-icon" class="fa-solid fa-hands-holding-circle text-2xl text-yellow-400"></i>
+                <div>
+                    <h1 id="nav-app-name" class="font-bold text-lg leading-tight">SELARAS</h1>
+                    <p id="nav-subtitle" class="text-xs text-blue-200">Unit Layanan Disabilitas</p>
+                </div>
+            </div>
+            <div class="flex gap-4">
+                <button onclick="navigate('home')" class="hover:text-yellow-400 transition hidden md:block">Beranda</button>
+                <button onclick="checkAdminAccess()" class="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2">
+                    <i class="fa-solid fa-lock"></i> Admin Panel
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <main id="app-container" class="container mx-auto px-4 py-8 min-h-screen">
+        
+        <!-- VIEW: HOME / REGISTRATION FORM -->
+        <div id="view-home" class="fade-in max-w-4xl mx-auto">
+            <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+                <div id="form-header" class="bg-brand-primary p-6 text-white text-center transition-colors duration-300">
+                    <h2 class="text-2xl font-bold mb-2">Formulir Pendaftaran Konsultasi</h2>
+                    <p class="text-blue-100">Layanan Daring dan Luring untuk Pendidikan Inklusif</p>
+                </div>
+                
+                <form id="consultationForm" onsubmit="handleFormSubmit(event)" class="p-6 md:p-8 space-y-8">
+                    
+                    <!-- 0. Jenis Layanan -->
+                    <section>
+                        <h3 class="text-lg font-bold text-brand-primary border-b pb-2 mb-4 transition-colors duration-300"><i class="fa-solid fa-layer-group mr-2"></i>Jenis Layanan</h3>
+                        <div class="flex flex-col gap-4">
+                            <label class="flex items-start gap-3 cursor-pointer bg-gray-50 p-4 rounded-lg border hover:bg-gray-100 transition">
+                                <input type="radio" name="serviceType" value="Daring" required class="text-brand-primary w-5 h-5 mt-1">
+                                <div>
+                                    <span class="font-bold block">Konsultasi Daring</span>
+                                    <span class="text-sm text-gray-500 block mt-1">Konsultasi dilakukan secara online melalui media yang akan diinformasikan oleh admin.</span>
+                                </div>
+                            </label>
+                            <label class="flex items-start gap-3 cursor-pointer bg-gray-50 p-4 rounded-lg border hover:bg-gray-100 transition">
+                                <input type="radio" name="serviceType" value="Luring" required class="text-brand-primary w-5 h-5 mt-1">
+                                <div>
+                                    <span class="font-bold block">Konsultasi Luring</span>
+                                    <span class="text-sm text-gray-500 block mt-1">Konsultasi dilakukan dengan datang langsung ke Gedung Dinas Pendidikan Provinsi DKI Jakarta sesuai jadwal yang diberikan.</span>
+                                </div>
+                            </label>
+                        </div>
+                    </section>
+
+                    <!-- 1. Data Pendaftar -->
+                    <section>
+                        <h3 class="text-lg font-bold text-brand-primary border-b pb-2 mb-4 transition-colors duration-300"><i class="fa-solid fa-user-tag mr-2"></i>Data Pendaftar (Pendamping)</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Nama Lengkap</label>
+                                <input type="text" name="parentName" required class="w-full border-gray-300 border rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none transition">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Nomor HP (WhatsApp)</label>
+                                <input type="tel" name="phone" id="phoneInput" required placeholder="08xxxxxxxxxx" class="w-full border-gray-300 border rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none transition">
+                                <p id="phoneError" class="text-red-500 text-xs mt-1 hidden">Nomor HP tidak valid (Gunakan format Indonesia)</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">E-Mail</label>
+                                <input type="email" name="email" required class="w-full border-gray-300 border rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none transition">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Peran</label>
+                                <div class="flex gap-4 mt-2">
+                                    <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="role" value="Guru" required class="text-blue-600"> Guru</label>
+                                    <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="role" value="Kepala Sekolah" class="text-blue-600"> Kepala Sekolah</label>
+                                    <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="role" value="Orang Tua / Wali" class="text-blue-600"> Orang Tua/Wali</label>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section>
+                        <h3 class="text-lg font-bold text-brand-primary border-b pb-2 mb-4 transition-colors duration-300"><i class="fa-solid fa-child mr-2"></i>Data Peserta Didik</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Nama Anak / Peserta Didik</label>
+                                <input type="text" name="studentName" required class="w-full border-gray-300 border rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Tanggal Lahir</label>
+                                <input type="date" name="dob" required class="w-full border-gray-300 border rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Jenis Kelamin</label>
+                                <div class="flex gap-4 mt-2">
+                                    <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="gender" value="L" required class="text-blue-600"> Laki-laki</label>
+                                    <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="gender" value="P" class="text-blue-600"> Perempuan</label>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section>
+                        <h3 class="text-lg font-bold text-brand-primary border-b pb-2 mb-4 transition-colors duration-300"><i class="fa-solid fa-graduation-cap mr-2"></i>Jenjang Pendidikan</h3>
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Pilih Jenjang</label>
+                            <select name="educationLevel" id="educationLevel" onchange="handleEducationChange()" required class="w-full border-gray-300 border rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                                <option value="">-- Pilih Jenjang --</option>
+                                <option value="Belum Sekolah">Belum Sekolah</option>
+                                <option value="PAUD">PAUD</option>
+                                <option value="SD">SD</option>
+                                <option value="SMP">SMP</option>
+                                <option value="SMA">SMA</option>
+                                <option value="SMK">SMK</option>
+                                <option value="SLB">SLB</option>
+                                <option value="PKBM">PKBM</option>
+                                <option value="SKB">SKB</option>
+                                <option value="LPK">LPK (Kursus/Bimbel/Bimba/dll)</option>
+                            </select>
+                        </div>
+                        <div id="dynamicFields" class="bg-gray-50 p-4 rounded-lg border border-gray-200 hidden"></div>
+                    </section>
+
+                    <section>
+                        <h3 class="text-lg font-bold text-brand-primary border-b pb-2 mb-4 transition-colors duration-300"><i class="fa-solid fa-bullseye mr-2"></i>Tujuan Konsultasi</h3>
+                        <select name="purpose" id="purposeSelect" onchange="handlePurposeChange()" required class="w-full border-gray-300 border rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                            <option value="">-- Pilih Tujuan --</option>
+                            <option value="Strategi pembelajaran anak berkebutuhan khusus">Strategi pembelajaran anak berkebutuhan khusus</option>
+                            <option value="Deteksi dan Intervensi Dini Anak Berkebutuhan Khusus">Deteksi dan Intervensi Dini Anak Berkebutuhan Khusus</option>
+                            <option value="Psikologi perkembangan anak berkebutuhan khusus">Psikologi perkembangan anak berkebutuhan khusus</option>
+                            <option value="Bentuk penanganan dan layanan terapi bagi anak berkebutuhan khusus">Bentuk penanganan dan layanan terapi bagi anak berkebutuhan khusus</option>
+                            <option value="Layanan Pendidikan yang tepat">Layanan Pendidikan yang tepat</option>
+                            <option value="Tes Intelegensi (IQ)">Tes Intelegensi (IQ)</option>
+                        </select>
+                    </section>
+
+                    <section>
+                        <h3 class="text-lg font-bold text-brand-primary border-b pb-2 mb-4 transition-colors duration-300"><i class="fa-solid fa-pen-to-square mr-2"></i>Uraian Masalah</h3>
+                        <div class="space-y-2">
+                            <textarea name="problemDesc" rows="8" required placeholder="Jelaskan secara rinci masalah yang dialami anak, sejak kapan terjadi, di mana sering muncul (rumah/sekolah/lingkungan), serta hal apa saja yang sudah pernah dilakukan untuk mengatasinya." class="w-full border-gray-300 border rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none resize-y"></textarea>
+                            <p class="text-xs text-gray-500 italic">Semakin detail informasi yang diberikan akan membantu tenaga ahli memberikan penanganan yang lebih tepat.</p>
+                        </div>
+                    </section>
+
+                    <section>
+                        <h3 class="text-lg font-bold text-brand-primary border-b pb-2 mb-4 transition-colors duration-300"><i class="fa-solid fa-file-medical mr-2"></i>Riwayat Pemeriksaan</h3>
+                        <p class="mb-2 font-medium">Apakah pernah melakukan Tes IQ / BERA / Pemeriksaan lainnya?</p>
+                        <div class="flex gap-4 mb-4">
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="hasHistory" value="Ya" onchange="toggleFileUpload(true)" class="text-blue-600"> Ya, pernah</label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="hasHistory" value="Tidak" onchange="toggleFileUpload(false)" checked class="text-blue-600"> Belum pernah</label>
+                        </div>
+                        <div id="fileUploadSection" class="hidden bg-blue-50 p-4 rounded-lg border border-blue-200">
+                            <label class="block text-sm font-medium text-blue-800 mb-2">Upload Hasil Tes (PDF/JPG/PNG)</label>
+                            <input type="file" id="historyFile" accept=".pdf,.jpg,.jpeg,.png" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700"/>
+                        </div>
+                    </section>
+
+                    <div class="pt-4">
+                        <button type="submit" class="w-full bg-brand-primary hover-brand-primary text-white font-bold py-4 rounded-xl shadow-lg transform transition hover:-translate-y-1 transition-colors duration-300">
+                            <i class="fa-solid fa-paper-plane mr-2"></i> Kirim Pendaftaran
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- VIEW: ADMIN LOGIN -->
+        <div id="view-login" class="hidden fade-in max-w-md mx-auto mt-20">
+            <div id="login-card" class="bg-white p-8 rounded-xl shadow-xl text-center relative overflow-hidden">
+                <div id="login-bg-layer" class="absolute inset-0 opacity-20 bg-cover bg-center pointer-events-none" style="background-image: url('');"></div>
+                <div class="relative z-10">
+                    <div class="mb-6 text-brand-primary">
+                        <i id="login-icon" class="fa-solid fa-user-shield text-5xl transition-colors duration-300"></i>
+                    </div>
+                    <h2 class="text-2xl font-bold mb-6">Login Admin</h2>
+                    <form onsubmit="handleAdminLogin(event)">
+                        <input type="text" id="adminUser" placeholder="Username" class="w-full mb-4 p-3 border rounded-lg">
+                        <input type="password" id="adminPass" placeholder="Password" class="w-full mb-6 p-3 border rounded-lg">
+                        <button type="submit" class="w-full bg-brand-primary text-white py-3 rounded-lg font-bold transition-colors duration-300">Masuk</button>
+                    </form>
+                    <button onclick="navigate('home')" class="mt-4 text-sm text-gray-500 hover:underline">Kembali ke Beranda</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- VIEW: ADMIN DASHBOARD -->
+        <div id="view-dashboard" class="hidden fade-in">
+            <div class="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-800">Dashboard Admin</h2>
+                    <p class="text-gray-500">Selamat datang, Administrator.</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="openExportModal()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow transition flex items-center gap-2">
+                        <i class="fa-solid fa-file-pdf"></i> Unduh Laporan F4
+                    </button>
+                    <button onclick="renderAdminTable('all')" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm font-medium">Semua</button>
+                    <button onclick="renderAdminTable('Menunggu Konfirmasi')" class="px-4 py-2 bg-yellow-100 text-yellow-800 rounded hover:bg-yellow-200 text-sm font-medium">Menunggu</button>
+                    <button onclick="renderAdminTable('Terjadwal')" class="px-4 py-2 bg-blue-100 text-blue-800 rounded hover:bg-blue-200 text-sm font-medium">Terjadwal</button>
+                    <button onclick="renderAdminTable('Selesai')" class="px-4 py-2 bg-green-100 text-green-800 rounded hover:bg-green-200 text-sm font-medium">Selesai</button>
+                    <button onclick="logoutAdmin()" class="px-4 py-2 bg-red-100 text-red-800 rounded hover:bg-red-200 text-sm font-medium"><i class="fa-solid fa-right-from-bracket"></i> Logout</button>
+                </div>
+            </div>
+
+            <!-- Stats Cards -->
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+                <div class="bg-white p-4 rounded-xl shadow border-l-4 border-blue-500">
+                    <p class="text-xs text-gray-500 uppercase">Total Selesai</p>
+                    <p class="text-2xl font-bold" id="stat-selesai">0</p>
+                </div>
+                <div class="bg-white p-4 rounded-xl shadow border-l-4 border-yellow-500">
+                    <p class="text-xs text-gray-500 uppercase">Proses</p>
+                    <p class="text-2xl font-bold" id="stat-proses">0</p>
+                </div>
+                <div class="bg-white p-4 rounded-xl shadow border-l-4 border-red-500">
+                    <p class="text-xs text-gray-500 uppercase">Cancel</p>
+                    <p class="text-2xl font-bold" id="stat-cancel">0</p>
+                </div>
+                <div class="bg-white p-4 rounded-xl shadow border-l-4 border-indigo-500">
+                    <p class="text-xs text-gray-500 uppercase">Terjadwal</p>
+                    <p class="text-2xl font-bold" id="stat-terjadwal">0</p>
+                </div>
+                <div class="bg-white p-4 rounded-xl shadow border-l-4 border-gray-500">
+                    <p class="text-xs text-gray-500 uppercase">Menunggu</p>
+                    <p class="text-2xl font-bold" id="stat-menunggu">0</p>
+                </div>
+                <div class="bg-white p-4 rounded-xl shadow border-l-4 border-purple-600">
+                    <p class="text-xs text-gray-500 uppercase">Total Antrian IQ</p>
+                    <p class="text-2xl font-bold" id="stat-antrian">0</p>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-gray-100 text-gray-600 uppercase font-bold">
+                        <tr>
+                            <th class="p-4">Tgl Daftar</th>
+                            <th class="p-4">Nama Pendaftar</th>
+                            <th class="p-4">No. HP</th>
+                            <th class="p-4">Anak</th>
+                            <th class="p-4">Sekolah/Asal</th>
+                            <th class="p-4">Tujuan</th>
+                            <th class="p-4">Status</th>
+                            <th class="p-4 text-center">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody id="adminTableBody" class="divide-y divide-gray-200"></tbody>
+                </table>
+            </div>
+            
+            <div class="mt-4 text-right">
+                <button onclick="navigate('settings')" class="text-brand-primary hover:underline font-medium transition-colors duration-300"><i class="fa-solid fa-gear mr-1"></i> Pengaturan Sistem</button>
+            </div>
+        </div>
+
+        <!-- VIEW: ADMIN SETTINGS -->
+        <div id="view-settings" class="hidden fade-in max-w-4xl mx-auto">
+            <div class="bg-white rounded-xl shadow-lg p-6 md:p-8">
+                <div class="flex justify-between items-center mb-6 border-b pb-4">
+                    <h2 class="text-2xl font-bold text-gray-800">Pengaturan Sistem</h2>
+                    <button onclick="navigate('dashboard')" class="text-gray-500 hover:text-gray-800"><i class="fa-solid fa-arrow-left"></i> Kembali</button>
+                </div>
+
+                <div class="mb-8 border p-6 rounded-lg bg-gray-50">
+                    <h3 class="text-lg font-bold text-brand-primary mb-4 flex items-center gap-2"><i class="fa-solid fa-id-card"></i> Identitas Aplikasi</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label class="block text-sm font-medium mb-1">Nama Aplikasi</label><input type="text" id="setAppName" class="w-full border rounded p-2"></div>
+                        <div><label class="block text-sm font-medium mb-1">Sub Judul / Tagline</label><input type="text" id="setAppTagline" class="w-full border rounded p-2"></div>
+                        <div><label class="block text-sm font-medium mb-1">Logo Aplikasi (Kecil/Navbar)</label><input type="file" id="setAppLogo" accept="image/*" class="block w-full text-sm"></div>
+                        <div><label class="block text-sm font-medium mb-1">Logo Instansi (Kop Surat/PDF)</label><input type="file" id="setAgencyLogo" accept="image/*" class="block w-full text-sm"></div>
+                        <div><label class="block text-sm font-medium mb-1">Favicon (Icon Tab)</label><input type="file" id="setFavicon" accept="image/*" class="block w-full text-sm"></div>
+                    </div>
+                </div>
+
+                <div class="mb-8 border p-6 rounded-lg bg-gray-50">
+                    <h3 class="text-lg font-bold text-brand-primary mb-4 flex items-center gap-2"><i class="fa-solid fa-palette"></i> Tampilan</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div><label class="block text-sm font-medium mb-1">Warna Utama (Navbar/Header)</label><div class="flex items-center gap-3"><input type="color" id="setPrimaryColor"><span class="text-sm text-gray-500" id="setPrimaryColorText">#1e3a8a</span></div></div>
+                        <div><label class="block text-sm font-medium mb-1">Background Halaman Login</label><input type="file" id="setLoginBg" accept="image/*" class="block w-full text-sm"></div>
+                        <div class="md:col-span-2"><label class="block text-sm font-medium mb-1">Teks Footer (Copyright)</label><input type="text" id="setFooterText" class="w-full border rounded p-2"></div>
+                    </div>
+                </div>
+
+                <div class="mb-8 border p-6 rounded-lg bg-gray-50">
+                    <h3 class="text-lg font-bold text-brand-primary mb-3"><i class="fa-solid fa-school mr-2"></i>Bank Data Sekolah (NPSN)</h3>
+                    <p class="text-sm text-gray-600 mb-3">Upload file Excel/Spreadsheet (.xlsx) dengan kolom <strong>NPSN</strong> dan <strong>Nama Sekolah</strong>.</p>
+                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center bg-white hover:bg-gray-100 transition">
+                        <input type="file" id="schoolDataUpload" accept=".xlsx, .xls, .csv" class="hidden" onchange="processSchoolUpload(this)">
+                        <button onclick="document.getElementById('schoolDataUpload').click()" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-700"><i class="fa-solid fa-upload mr-2"></i> Upload Data Sekolah</button>
+                        <p class="mt-2 text-xs text-gray-500" id="schoolCountInfo">Data Sekolah Saat Ini: <span id="totalSchools">0</span></p>
+                    </div>
+                </div>
+
+                <div class="mb-8 border p-6 rounded-lg bg-gray-50">
+                    <h3 class="text-lg font-bold text-brand-primary mb-3"><i class="fa-solid fa-file-pdf mr-2"></i>Template Surat PDF (Full Background)</h3>
+                    <p class="text-sm text-gray-600 mb-3">Upload gambar (JPG/PNG) untuk dijadikan background surat PDF.</p>
+                    <div class="flex items-center gap-4">
+                        <input type="file" id="pdfTemplateUpload" accept="image/*" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700">
+                        <button onclick="savePdfTemplate()" class="bg-green-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-green-700">Simpan Template</button>
+                    </div>
+                    <div id="previewTemplate" class="mt-4 border rounded max-h-40 overflow-hidden hidden"></div>
+                </div>
+
+                <div class="flex justify-end gap-4">
+                    <button onclick="resetSystem()" class="border border-red-500 text-red-500 px-4 py-2 rounded hover:bg-red-50">Reset Data</button>
+                    <button onclick="saveAllSettings()" class="bg-brand-primary text-white px-6 py-2 rounded font-bold hover-brand-primary shadow-lg transition-colors duration-300">Simpan Semua Perubahan</button>
+                </div>
+            </div>
+        </div>
+        
+        <footer class="mt-12 py-6 text-center text-gray-500 text-sm border-t">
+            <p id="footer-text-display">Dinas Pendidikan Provinsi DKI Jakarta</p>
+        </footer>
+    </main>
+
+    <!-- Modal Detail & Aksi -->
+    <div id="actionModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div class="p-6 border-b flex justify-between items-center bg-gray-50">
+                <h3 class="text-xl font-bold text-gray-800">Detail & Kelola Status</h3>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            <div class="p-6" id="modalContent"></div>
+        </div>
+    </div>
+
+    <!-- Modal Export PDF -->
+    <div id="exportModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md">
+            <div class="p-6 border-b flex justify-between items-center bg-gray-50">
+                <h3 class="text-xl font-bold text-gray-800"><i class="fa-solid fa-file-pdf mr-2"></i>Unduh Laporan F4</h3>
+                <button onclick="closeExportModal()" class="text-gray-400 hover:text-gray-600"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            <div class="p-6 space-y-4">
+                <div class="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-gray-50" onclick="selectExportMode('filtered')">
+                    <div>
+                        <h4 class="font-bold">Data yang Ditampilkan</h4>
+                        <p class="text-xs text-gray-500">Mengunduh data sesuai filter tabel saat ini</p>
+                    </div>
+                    <input type="radio" name="exportMode" value="filtered" checked>
+                </div>
+                <div class="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-gray-50" onclick="selectExportMode('all')">
+                    <div>
+                        <h4 class="font-bold">Semua Data</h4>
+                        <p class="text-xs text-gray-500">Mengunduh seluruh riwayat pendaftaran</p>
+                    </div>
+                    <input type="radio" name="exportMode" value="all">
+                </div>
+                <div id="dateRangeContainer" class="hidden border-t pt-4 mt-2">
+                    <label class="block text-sm font-medium mb-2">Rentang Tanggal (Opsional)</label>
+                    <div class="flex gap-2">
+                        <input type="date" id="exportDateStart" class="w-full border rounded p-2 text-sm">
+                        <input type="date" id="exportDateEnd" class="w-full border rounded p-2 text-sm">
+                    </div>
+                </div>
+                <button onclick="generateBulkPDF()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg shadow-lg flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-download"></i> Proses Unduh PDF F4
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
