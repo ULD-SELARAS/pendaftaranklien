@@ -12,7 +12,7 @@ const ADMIN_SESSION_KEY = 'uld_admin_session';
 
 // --- KONFIGURASI INTEGRASI GOOGLE (WAJIB DIISI) ---
 // ⚠️ PASTIKAN URL INI SUDAH BENAR
-const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxJdvMXn1ZIV2DwIsSrUzWGLK3Fb8jkfIBROZbIgQwqmnsBaYnL2HvYxOkhYYDp7qvN/exec";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxPUZgShQ3O6E-aK63BzUHu7x94oUO1D3NKIdApimpeRPT3_YdnkKhHi3w6BlrvoHVP/exec";
 
 const defaultSettings = {
     appName: "SELARAS",
@@ -316,107 +316,16 @@ function toggleFileUpload(show) {
 }
 
 // --- 5. SUBMISSION HANDLING (WITH CLOUD) ---
-async function handleFormSubmit(e) {
-    e.preventDefault();
-    showLoading(true);
-    
-    console.log('📝 Form submitted!');
-    
-    const formData = new FormData(e.target);
-    const data = Object.fromEntries(formData.entries());
-    
-    const phoneRegex = /^(\+62|62|0)8[1-9][0-9]{6,9}$/;
-    if (!phoneRegex.test(data.phone)) {
-        showLoading(false);
-        showToast('Error', 'Nomor HP tidak valid', 'error');
-        return;
-    }
-    
-    const level = data.educationLevel;
-    let isRejected = false;
-    let rejectionReason = "";
-    
-    if ((level === 'Belum Sekolah' || level === 'LPK') && data.city === 'Lainnya') {
-        isRejected = true;
-        rejectionReason = "Ditolak Wilayah";
-    }
-    
-    // Proses File Upload ke Drive (Jika ada)
-    let driveFileUrl = null;
-    if (data.hasHistory === 'Ya' && GOOGLE_SCRIPT_URL) {
-        const fileInput = document.getElementById('historyFile');
-        if (fileInput.files.length > 0) {
-            const now = new Date();
-            const folderPath = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}`;
-            
-            console.log('📁 Uploading to folder:', folderPath);
-            driveFileUrl = await uploadFileToDrive(fileInput.files[0], folderPath);
-            
-            if (!driveFileUrl) {
-                console.error('❌ File upload failed!');
-            }
-        }
-    }
-    
-    let queueNumber = null;
-    if (data.purpose === 'Tes Intelegensi (IQ)') {
-        queueNumber = state.queueCounter++;
-        saveState();
-    }
-    
-    if (driveFileUrl) data.driveFileLink = driveFileUrl;
-    
-    const submission = {
-        id: Date.now().toString(),
-        createdAt: new Date().toISOString(),
-        status: isRejected ? rejectionReason : 'Menunggu Konfirmasi',
-        queueNumber: queueNumber,
-        data: data,
-        fileName: data.hasHistory === 'Ya' ? (document.getElementById('historyFile').files[0] || {}).name : null,
-        isDeleted: false,
-        isPurposeEdited: false,
-        auditLog: []
-    };
-    
-    console.log('📦 Submission object:', submission);
-    
-    // Simpan ke Spreadsheet
-    if (GOOGLE_SCRIPT_URL) {
-        const sheetSuccess = await saveToSpreadsheet(submission);
-        if (!sheetSuccess) {
-            showLoading(false);
-            showToast('Gagal', 'Gagal menyimpan ke Database Server. Data hanya tersimpan lokal.', 'warning');
-            // Tetap simpan ke localStorage meskipun gagal ke server
-        }
-    }
-    
-    state.submissions.push(submission);
-    saveState();
-    showLoading(false);
-    
-    console.log('✅ Form submission complete!');
-    
-    if (isRejected) {
-        Swal.fire({
-            title: 'Mohon Maaf',
-            html: 'Layanan hanya melayani wilayah DKI Jakarta.',
-            icon: 'warning',
-            confirmButtonColor: '#d33'
-        });
-    } else {
-        Swal.fire({
-            title: 'Pendaftaran Berhasil',
-            text: 'Data telah tersimpan. Mohon menunggu admin menghubungi anda.',
-            icon: 'success',
-            confirmButtonColor: state.settings.primaryColor
-        });
-    }
-    
-    e.target.reset();
-    document.getElementById('dynamicFields').innerHTML = '';
-    document.getElementById('dynamicFields').classList.add('hidden');
+async function fileToBase64(file){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+  });
 }
 
+handleFormSubmit()
 // --- 6. ADMIN PANEL LOGIC ---
 function checkAdminAccess() {
     state.isAdmin ? navigate('dashboard') : navigate('login');
