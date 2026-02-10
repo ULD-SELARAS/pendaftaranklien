@@ -11,7 +11,7 @@ const SETTINGS_KEY = 'uld_settings';
 const ADMIN_SESSION_KEY = 'uld_admin_session';
 
 // --- KONFIGURASI GOOGLE (PENTING!) ---
-const GOOGLE_SCRIPT_URL = "https://script.googleusercontent.com/macros/echo?user_content_key=AehSKLhFzsCgzzExMYqYso1E_bbqi6a1UeSKvBwmy3Ztvdih3WZEF96uFOxIKH9DEX8TV3tL-2H-l8sFiWDoVzT6Wk_1xjbBWgshqD8uGfQKYKkLCa_bQNtNvufU6Og8k2PfpTS0owrfqVBNE4lBpgaekrtBQlaEapW0R0wSlsK88kndoIYw0Vdv_0I-eB-XWS9I1rcJypWJIZFynWGz18D4FNjukFMzBQjfA82EvviddjYCg2uE9MsomZ3sxSAXlGRsVF_-IKb9vQL9QFy0usmzkXVZvbMjcg&lib=MDqeOt2VRc1RsDQvkO75tamAGFOlNCMp3";
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzEBcrcqBNUx3tfh4pTU-Y9Aqc1ATzvA52qeeY7j1BWkprHcfkmMxv_padkT6o6Iw8Z/exec";
 
 const defaultSettings = {
     appName: "SELARAS",
