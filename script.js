@@ -4,7 +4,7 @@
 
 // ===== URL WEB APP (PAKAI YANG /exec !!!) =====
 const GOOGLE_SCRIPT_URL =
-"https://script.google.com/macros/s/AKfycbxPUZgShQ3O6E-aK63BzUHu7x94oUO1D3NKIdApimpeRPT3_YdnkKhHi3w6BlrvoHVP/exec";
+"https://script.google.com/macros/s/AKfycbxskX-I8YdS4wr46OsaWQHZVKFNQjTRfefFuTdzU2A-8n0nBuHEizaaSujRYy722_5-/exec";
 
 
 // ==========================================
